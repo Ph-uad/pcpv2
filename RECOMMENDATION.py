@@ -18,9 +18,10 @@ class Recommendation_Module:
 
     def __init__(self, df, name_column):
         self.df = df
+        self.data = df
         # Name of the column that contains the artist names in our case "artists"
         self.name_column = name_column
-        self.artist = df[name_column].tolist()
+        self.artist = self.data[name_column].tolist()
         
         self.df = self.extract_features()
         
@@ -43,12 +44,27 @@ class Recommendation_Module:
         # self.df['Cluster'] = kmeans.fit_predict(self.df)
         
     def visulize_cluster(self, based_on = ['popularity', 'tempo']):
-        sns.scatterplot(x='feature1', y='feature2', hue='Cluster', data=self.df, palette='viridis')
+        sns.scatterplot(x=based_on[0], y=based_on[1] , hue='Cluster', data=self.df, palette='viridis')
         plt.title('K-Means Clustering')
         plt.show()
 
-        plt.scatter(self.df['Cluster'], self.df['acousticness'])
+        plt.scatter(self.df['Cluster'], self.df['popularity'])
         plt.show()
+        
+    def get_recommendation_by_name_using_cluster(self, name):    
+        target_index = self.get_random_artist_observation_index_by_name(name)
+
+        if target_index is None:
+            return None
+        
+        #get the cluster value of the target artist
+        target_cluster
+        # target_cluster = self.df[self.data[self.name_column] == name]['Cluster'].values[0]
+        
+        #get indexes of artists in the same cluster
+        recommendations = self.df[self.df['Cluster'] == target_cluster]
+        return recommendations
+         
         
     def get_random_artist_observation_index_by_name(self, name):
         indexes = []
