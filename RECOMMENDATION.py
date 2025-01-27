@@ -3,6 +3,7 @@ import random
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy.sparse import csr_matrix
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.sparse import csr_matrix
@@ -10,25 +11,45 @@ from scipy.sparse import csr_matrix
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
+import seaborn as sns
 
 
 class Recommendation_Module:
-    # "artists", "id", "name", "loudness", "release_date"
+
     def __init__(self, df, name_column):
         self.df = df
         # Name of the column that contains the artist names in our case "artists"
         self.name_column = name_column
-        self.exclude_features = exclude_features
         self.artist = df[name_column].tolist()
-
-        # self.target_column = target_column
+        
+        self.df = self.extract_features()
+        
         
     def extract_features(self):
         if "genres" not in  self.df.columns:
-            return self.df.drop(colums = ["artists", "id", "name", "release_date"])
+            return self.df.drop(columns = ["artists", "id", "name", "release_date"])
         else:
             return self.df.drop(columns = ["id"])
 
+    def split_features(self):
+        x_train, y_train = train_test_split(self.df, test_size=0.2, random_state=42)
+        return x_train, y_train
+    
+    def create_cluster(self):
+        # Usinjg K-means clustering
+        kmeans = KMeans(n_clusters=3, random_state=100)
+        cluster = kmeans.fit_predict(self.df)
+        self.df['Cluster'] = cluster
+        # self.df['Cluster'] = kmeans.fit_predict(self.df)
+        
+    def visulize_cluster(self, based_on = ['popularity', 'tempo']):
+        sns.scatterplot(x='feature1', y='feature2', hue='Cluster', data=self.df, palette='viridis')
+        plt.title('K-Means Clustering')
+        plt.show()
+
+        plt.scatter(self.df['Cluster'], self.df['acousticness'])
+        plt.show()
+        
     def get_random_artist_observation_index_by_name(self, name):
         indexes = []
 
@@ -45,12 +66,7 @@ class Recommendation_Module:
             return indexes[random.randint(0, len(indexes))]
 
     def normalize_data(self):
-        if self.exclude_features is not None:
-            data = self.df.drop(columns=self.exclude_features).values
-        else:
-            data = self.df.values
-
-        return normalize(data)
+        return normalize(self.df)
 
     def get_top_n_similar_variables(self, name, n=5):
 
@@ -59,7 +75,7 @@ class Recommendation_Module:
         if target_index is None:
             return None
 
-        normalized_data = normalized_data()
+        normalized_data = self.normalize_data()
 
         sparse_data = csr_matrix(normalized_data)
         similarity_scores = cosine_similarity(sparse_data, dense_output=False)
