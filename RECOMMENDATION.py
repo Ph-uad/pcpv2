@@ -2,11 +2,11 @@ import random
 
 from matplotlib import pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy.sparse import csr_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
-from scipy.sparse import csr_matrix
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
@@ -16,55 +16,66 @@ import seaborn as sns
 
 class Recommendation_Module:
 
-    def __init__(self, df, name_column):
+    def __init__(self, df, name_column = "artists"):
         self.df = df
         self.data = df
         # Name of the column that contains the artist names in our case "artists"
-        self.name_column = name_column
         self.artist = self.data[name_column].tolist()
-        
+
         self.df = self.extract_features()
-        
-        
+
     def extract_features(self):
-        if "genres" not in  self.df.columns:
-            return self.df.drop(columns = ["artists", "id", "name", "release_date"])
+        if "genres" not in self.df.columns:
+            return self.df.drop(columns=["artists", "id", "name", "release_date"])
         else:
-            return self.df.drop(columns = ["id"])
+            return self.df.drop(columns=["id"])
 
     def split_features(self):
-        x_train, y_train = train_test_split(self.df, test_size=0.2, random_state=42)
+        x_train, y_train = train_test_split(
+            self.df, test_size=0.2, random_state=42)
         return x_train, y_train
-    
+
     def create_cluster(self):
         # Usinjg K-means clustering
         kmeans = KMeans(n_clusters=3, random_state=100)
         cluster = kmeans.fit_predict(self.df)
-        self.df['Cluster'] = cluster
-        # self.df['Cluster'] = kmeans.fit_predict(self.df)
-        
-    def visulize_cluster(self, based_on = ['popularity', 'tempo']):
-        sns.scatterplot(x=based_on[0], y=based_on[1] , hue='Cluster', data=self.df, palette='viridis')
-        plt.title('K-Means Clustering')
+        self.df['cluster'] = cluster
+        self.data['cluster'] = cluster
+        # self.df['cluster'] = kmeans.fit_predict(self.df)
+
+    def visulize_cluster(self, based_on=['popularity', 'tempo']):
+        sns.scatterplot(x=based_on[0], y=based_on[1],
+                        hue='cluster', data=self.df, palette='viridis')
+        plt.title('K-Means clustering')
         plt.show()
 
-        plt.scatter(self.df['Cluster'], self.df['popularity'])
+        plt.scatter(self.df['cluster'], self.df['popularity'])
         plt.show()
-        
-    def get_recommendation_by_name_using_cluster(self, name):    
+
+    def get_recommendation_by_cluster(self, name, n=5):
         target_index = self.get_random_artist_observation_index_by_name(name)
 
         if target_index is None:
             return None
+
+        # get the cluster value of the target artist
+        target_cluster_data = self.data.iloc[target_index]
+        recommendations = self.data["cluster"] == target_cluster_data["cluster"]
+        recommended = self.data[recommendations]
+
+        target_popularity = target_cluster_data["popularity"]
+
+        # Filter for songs released within +10 or -10 popularity of the target artist
+        filtered = recommended[(recommended['popularity'] >= target_popularity - 10) & (recommended['popularity'] <= target_popularity + 10)]
+
+        # If fewer than n observations, include additional ones
+        if len(filtered) < n:
+            additional = recommended[~recommended.index.isin(filtered.index)]  # Exclude already selected
+            remaining_needed = n - len(filtered)
+            filtered = pd.concat([filtered, additional.head(remaining_needed)])
         
-        #get the cluster value of the target artist
-        target_cluster
-        # target_cluster = self.df[self.data[self.name_column] == name]['Cluster'].values[0]
-        
-        #get indexes of artists in the same cluster
-        recommendations = self.df[self.df['Cluster'] == target_cluster]
-        return recommendations
-         
+        return filtered.head(n)
+
         
     def get_random_artist_observation_index_by_name(self, name):
         indexes = []
@@ -84,65 +95,45 @@ class Recommendation_Module:
     def normalize_data(self):
         return normalize(self.df)
 
-    def get_top_n_similar_variables(self, name, n=5):
 
+    def get_top_n_similar_variables_by_similarity(self, name, n=5, chunk_size=None):
+        print("Getting top n similar variables by cosine similarity")
+
+        # Get the index of the target variable
         target_index = self.get_random_artist_observation_index_by_name(name)
-
         if target_index is None:
             return None
 
+        # Normalize the dataset
         normalized_data = self.normalize_data()
-
         sparse_data = csr_matrix(normalized_data)
-        similarity_scores = cosine_similarity(sparse_data, dense_output=False)
-        target_similarity = similarity_scores[target_index].toarray().flatten()
-        target_similarity[target_index] = -1
-        top_n_indices = np.argsort(target_similarity)[-n:][::-1]
 
-        return top_n_indices
+        # Split the dataset into chunks if chunk_size is provided
+        if chunk_size and sparse_data.shape[0] > chunk_size:
+            start_idx = (target_index // chunk_size) * chunk_size
+            end_idx = min(start_idx + chunk_size, sparse_data.shape[0])
+            chunk_data = sparse_data[start_idx:end_idx]
+            target_row = sparse_data[target_index]
 
-    def generate_recommendation_data(self, name, n=5):
-        scaler = StandardScaler()
-        
-        normalized_data = self.normalize_data()
-        scaled_features = scaler.fit_transform(normalized_data)
+            # Compute similarity only for the chunk
+            similarity_scores = cosine_similarity(chunk_data, target_row, dense_output=False).toarray().flatten()
+        else:
+            # Compute similarity for the entire dataset
+            similarity_scores = cosine_similarity(sparse_data, dense_output=False)[target_index].toarray().flatten()
 
-        # Apply K-Means
-        kmeans = KMeans(n_clusters=3, random_state=100)
-        self.df['Cluster'] = kmeans.fit_predict(scaled_features)
+        # Exclude the target variable itself if it is within chunk_size
+        if target_index <= len(similarity_scores):
+            similarity_scores[target_index] = -1
 
-        # Recommend items from the same cluster
-        target_cluster = 0
-        recommendations = self.df[self.df['Cluster'] == self.df[self.df[self.name_column] == name]['Cluster']].head(n)
+        # Find top-n similar indices
+        top_n_indices = np.argpartition(similarity_scores, -n)[-n:]
+        top_n_indices = top_n_indices[np.argsort(similarity_scores[top_n_indices])[::-1]]
         
-        recommendations = self.df[self.df['Cluster'] == target_cluster]
-        print("Items in Cluster 0 for Recommendation:")
-        print(recommendations)
- 
-        return recommendations
+        #get the observsations by using the indices
+        return self.data.iloc[top_n_indices]
 
-        
-    def optimize_k_means(self, max_clusters=10):      
-        means_values = []
-        inertia_values = []
-        
-        for k in range(1, max_clusters):
-            kmeans = KMeans(n_clusters=k)
-            kmeans.fit(self.normalize_data())
-            
-            means_values.append(k)
-            inertia_values.append(kmeans.inertia_)
-            
-        fig =plt.subplots(figsize=(10, 6))
-        plt.plot(means_values, inertia_values, 'o-')
-        plt.xlabel('Number of clusters')
-        plt.ylabel('Inertia')
-        plt.title('Elbow Method For Optimal k')
-        plt.grid(True)
-        plt.show()
-        
-        
-        
-        
-        
+
+
+
+#https://youtu.be/7QYxUv3j1gI?si=Q1Z9J9Q9Q9q
 #https://youtu.be/iNlZ3IU5Ffw?si=TK5_aHZcTlo7C7i4
